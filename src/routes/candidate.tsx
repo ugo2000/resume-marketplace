@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { Field } from '../components/forms';
 import { Layout } from '../components/layout';
 import type { Bindings } from '../env';
+import { getStripe } from '../lib/stripe';
 import { getServiceClient } from '../lib/supabase';
 import { requireRole } from '../middleware/role';
 import {
@@ -13,6 +14,7 @@ import {
   replaceResumePdf,
   saveCandidateResume,
 } from '../services/candidate-service';
+import { createIdentityCheckout } from '../services/payment-service';
 import type { AppVariables } from '../types/app';
 
 export const candidateRoutes = new Hono<{
@@ -72,6 +74,106 @@ candidateRoutes.post('/onboarding', async (c) => {
   if (error) return c.json({ error: 'onboarding_failed' }, 400);
   await service.from('users').update({ country }).eq('id', user.id);
   return c.redirect('/candidate/verification');
+});
+
+candidateRoutes.get('/verification', async (c) => {
+  const { data } = await getServiceClient(c)
+    .from('candidate_profiles')
+    .select('identity_status')
+    .eq('user_id', c.get('sessionUser')!.id)
+    .maybeSingle();
+  return c.html(
+    <Layout title="Identity verification">
+      <h1>Identity verification</h1>
+      <p>Status: {data?.identity_status ?? 'not_started'}</p>
+      <p>The one-time verification fee is $2.49 USD.</p>
+      <form method="post" action="/candidate/verification/checkout"><button>Pay and verify</button></form>
+      <form method="post" action="/candidate/verification/session"><button>Continue verification</button></form>
+    </Layout>,
+  );
+});
+
+candidateRoutes.post('/verification/checkout', async (c) => {
+  const checkout = await createIdentityCheckout(c, c.get('sessionUser')!.id);
+  return checkout.url ? c.redirect(checkout.url, 303) : c.json({ error: 'checkout_unavailable' }, 502);
+});
+
+candidateRoutes.post('/verification/session', async (c) => {
+  const user = c.get('sessionUser')!;
+  const service = getServiceClient(c);
+  const { data: verification } = await service
+    .from('identity_verifications')
+    .select('id,payment_id,provider_reference_id,status')
+    .eq('candidate_id', user.id)
+    .maybeSingle();
+  if (!verification) return c.json({ error: 'identity_payment_required' }, 402);
+
+  const stripe = getStripe(c);
+  if (verification.provider_reference_id) {
+    const existing = await stripe.identity.verificationSessions.retrieve(
+      verification.provider_reference_id,
+    );
+    return existing.url
+      ? c.redirect(existing.url, 303)
+      : c.json({ status: verification.status, error: 'identity_session_unavailable' }, 409);
+  }
+
+  try {
+    const session = await stripe.identity.verificationSessions.create(
+      {
+        type: 'document',
+        metadata: { candidateId: user.id, verificationId: verification.id },
+        return_url: `${c.env.APP_ORIGIN}/candidate/verification`,
+        options: { document: { require_matching_selfie: true } },
+      },
+      { idempotencyKey: `identity-session:${verification.id}` },
+    );
+    await service
+      .from('identity_verifications')
+      .update({
+        provider_reference_id: session.id,
+        status: 'requires_input',
+        started_at: new Date().toISOString(),
+      })
+      .eq('id', verification.id);
+    return session.url
+      ? c.redirect(session.url, 303)
+      : c.json({ error: 'identity_session_unavailable' }, 502);
+  } catch {
+    const { data: payment } = await service
+      .from('payments')
+      .select('stripe_payment_intent_id')
+      .eq('id', verification.payment_id)
+      .maybeSingle();
+    if (payment?.stripe_payment_intent_id) {
+      await stripe.refunds.create(
+        { payment_intent: payment.stripe_payment_intent_id },
+        { idempotencyKey: `identity-session-failure-refund:${verification.payment_id}` },
+      );
+    }
+    await service.from('payments').update({ status: 'refunded' }).eq('id', verification.payment_id);
+    await service.from('identity_verifications').update({ status: 'not_started' }).eq('id', verification.id);
+    await service.from('candidate_profiles').update({ identity_status: 'not_started' }).eq('user_id', user.id);
+    return c.json({ error: 'verification_session_creation_failed_refunded' }, 502);
+  }
+});
+
+candidateRoutes.post('/verification/appeal', async (c) => {
+  const user = c.get('sessionUser')!;
+  const body = await c.req.parseBody();
+  const reason = String(body.reason ?? '').trim();
+  if (reason.length < 10 || reason.length > 2000) {
+    return c.json({ error: 'appeal_reason_invalid' }, 400);
+  }
+  const { error } = await getServiceClient(c).from('reports').insert({
+    reporter_user_id: user.id,
+    target_type: 'identity_verification',
+    target_id: user.id,
+    reason,
+  });
+  return error
+    ? c.json({ error: 'appeal_submission_failed' }, 400)
+    : c.json({ ok: true }, 201);
 });
 
 candidateRoutes.get('/resume', async (c) => {

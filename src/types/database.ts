@@ -115,17 +115,65 @@ export type Database = {
         applied_at: string;
       }>;
       credit_wallets: Table<{ employer_id: string; available_credits: number; purchased_credits: number; used_credits: number; updated_at: string }>;
-      payments: Table<Record<string, unknown>>;
-      credit_transactions: Table<Record<string, unknown>>;
+      payments: Table<{
+        id: string;
+        user_id: string;
+        purpose: Database['public']['Enums']['payment_purpose'];
+        amount_cents: number;
+        currency: string;
+        stripe_checkout_session_id: string | null;
+        stripe_payment_intent_id: string | null;
+        status: Database['public']['Enums']['payment_status'];
+        created_at: string;
+        updated_at: string;
+      }>;
+      credit_transactions: Table<{
+        id: string;
+        employer_id: string;
+        type: Database['public']['Enums']['credit_transaction_type'];
+        quantity: number;
+        payment_id: string | null;
+        metadata: Json;
+        created_at: string;
+      }>;
       contact_unlocks: Table<Record<string, unknown>>;
-      identity_verifications: Table<Record<string, unknown>>;
-      webhook_events: Table<Record<string, unknown>>;
+      identity_verifications: Table<{
+        id: string;
+        candidate_id: string;
+        payment_id: string;
+        provider_reference_id: string | null;
+        status: Database['public']['Enums']['identity_status'];
+        country: Database['public']['Enums']['country_code'];
+        started_at: string | null;
+        verified_at: string | null;
+        updated_at: string;
+      }>;
+      webhook_events: Table<{
+        provider: string;
+        event_id: string;
+        event_type: string;
+        processed_at: string;
+      }>;
       audit_logs: Table<Record<string, unknown>>;
-      reports: Table<Record<string, unknown>>;
+      reports: Table<{
+        id: string;
+        reporter_user_id: string | null;
+        target_type: string;
+        target_id: string;
+        reason: string;
+        status: Database['public']['Enums']['report_status'];
+        created_at: string;
+        resolved_at: string | null;
+      }>;
       account_deletion_requests: Table<Record<string, unknown>>;
     };
     Views: Record<never, never>;
-    Functions: Record<never, never>;
+    Functions: {
+      grant_credit_purchase: {
+        Args: { p_employer_id: string; p_quantity: number; p_payment_id: string };
+        Returns: undefined;
+      };
+    };
     Enums: {
       user_role: 'candidate' | 'employer' | 'admin';
       user_status: 'active' | 'disabled' | 'suspended';
