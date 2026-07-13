@@ -1,0 +1,1 @@
+-- Test fixtures are created through Supabase Auth in integration tests.
