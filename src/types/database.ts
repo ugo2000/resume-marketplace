@@ -198,6 +198,14 @@ export type Database = {
         Args: { p_employer_id: string; p_quantity: number; p_payment_id: string };
         Returns: undefined;
       };
+      publish_job: {
+        Args: { p_job_id: string };
+        Returns: Database['public']['Tables']['jobs']['Row'];
+      };
+      renew_job: {
+        Args: { p_job_id: string };
+        Returns: Database['public']['Tables']['jobs']['Row'];
+      };
     };
     Enums: {
       user_role: 'candidate' | 'employer' | 'admin';

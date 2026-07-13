@@ -36,3 +36,94 @@ $$;
 
 revoke all on function public.grant_credit_purchase(uuid, integer, uuid) from public, anon, authenticated;
 grant execute on function public.grant_credit_purchase(uuid, integer, uuid) to service_role;
+
+create or replace function public.publish_job(p_job_id uuid)
+returns public.jobs
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs;
+  v_count integer;
+begin
+  if not exists (
+    select 1 from public.employer_profiles
+    where user_id = auth.uid() and review_status = 'approved'
+  ) then
+    raise exception 'employer_not_approved';
+  end if;
+
+  select count(*) into v_count
+  from public.jobs
+  where employer_id = auth.uid()
+    and status = 'published'
+    and expires_at > now()
+    and id <> p_job_id;
+
+  if v_count >= 10 then
+    raise exception 'active_job_limit';
+  end if;
+
+  update public.jobs
+  set status = 'published',
+      published_at = now(),
+      expires_at = now() + interval '30 days',
+      updated_at = now()
+  where id = p_job_id and employer_id = auth.uid()
+  returning * into v_job;
+
+  if v_job.id is null then
+    raise exception 'job_not_found';
+  end if;
+  return v_job;
+end;
+$$;
+
+create or replace function public.renew_job(p_job_id uuid)
+returns public.jobs
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.jobs;
+  v_count integer;
+begin
+  if not exists (
+    select 1 from public.employer_profiles
+    where user_id = auth.uid() and review_status = 'approved'
+  ) then
+    raise exception 'employer_not_approved';
+  end if;
+
+  select count(*) into v_count
+  from public.jobs
+  where employer_id = auth.uid()
+    and status = 'published'
+    and expires_at > now()
+    and id <> p_job_id;
+
+  if v_count >= 10 then
+    raise exception 'active_job_limit';
+  end if;
+
+  update public.jobs
+  set status = 'published',
+      published_at = now(),
+      expires_at = now() + interval '30 days',
+      updated_at = now()
+  where id = p_job_id and employer_id = auth.uid()
+  returning * into v_job;
+
+  if v_job.id is null then
+    raise exception 'job_not_found';
+  end if;
+  return v_job;
+end;
+$$;
+
+revoke all on function public.publish_job(uuid) from public, anon;
+revoke all on function public.renew_job(uuid) from public, anon;
+grant execute on function public.publish_job(uuid) to authenticated;
+grant execute on function public.renew_job(uuid) to authenticated;
