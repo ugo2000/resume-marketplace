@@ -85,8 +85,33 @@ export type Database = {
         size_bytes: number;
         uploaded_at: string;
       }>;
-      employer_profiles: Table<Record<string, unknown>>;
-      employer_documents: Table<Record<string, unknown>>;
+      employer_profiles: Table<{
+        user_id: string;
+        company_name: string;
+        website: string;
+        company_email: string;
+        registration_number: string;
+        country: Database['public']['Enums']['country_code'];
+        review_status: Database['public']['Enums']['employer_review_status'];
+        reviewed_by: string | null;
+        reviewed_at: string | null;
+        rejection_reason: string | null;
+        created_at: string;
+        updated_at: string;
+      }>;
+      employer_documents: Table<{
+        id: string;
+        employer_id: string;
+        storage_path: string;
+        original_filename: string;
+        mime_type: string;
+        size_bytes: number;
+        document_type: string;
+        file_sha256: string;
+        uploaded_at: string;
+        delete_after: string | null;
+        legal_hold: boolean;
+      }>;
       jobs: Table<{
         id: string;
         employer_id: string;
