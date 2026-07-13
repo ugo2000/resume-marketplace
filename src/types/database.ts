@@ -161,7 +161,13 @@ export type Database = {
         metadata: Json;
         created_at: string;
       }>;
-      contact_unlocks: Table<Record<string, unknown>>;
+      contact_unlocks: Table<{
+        employer_id: string;
+        candidate_id: string;
+        source: Database['public']['Enums']['unlock_source'];
+        credit_transaction_id: string | null;
+        unlocked_at: string;
+      }>;
       identity_verifications: Table<{
         id: string;
         candidate_id: string;
@@ -225,6 +231,36 @@ export type Database = {
       refund_credit_purchase: {
         Args: { p_payment_id: string };
         Returns: undefined;
+      };
+      search_candidates: {
+        Args: {
+          p_query?: string | null;
+          p_country?: Database['public']['Enums']['country_code'] | null;
+          p_state?: string | null;
+          p_city?: string | null;
+          p_min_years?: number | null;
+          p_limit?: number;
+          p_offset?: number;
+        };
+        Returns: {
+          candidate_id: string;
+          initials: string;
+          headline: string;
+          summary: string;
+          years_experience: number;
+          city: string;
+          state_province: string;
+          country: Database['public']['Enums']['country_code'];
+          work_authorization: string;
+          skills: string[];
+        }[];
+      };
+      unlock_candidate: {
+        Args: { p_candidate_id: string };
+        Returns: {
+          source: Database['public']['Enums']['unlock_source'];
+          available_credits: number;
+        }[];
       };
     };
     Enums: {

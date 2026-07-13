@@ -8,6 +8,7 @@ import { requireRole } from '../middleware/role';
 import { createCreditCheckout } from '../services/credit-service';
 import { submitEmployerReview } from '../services/employer-service';
 import { createJobSlug, jobDraftSchema } from '../services/job-service';
+import { getAuthorizedCandidate, unlockCandidate } from '../services/unlock-service';
 import type { AppVariables } from '../types/app';
 
 export const employerRoutes = new Hono<{
@@ -31,6 +32,8 @@ const requireApprovedEmployer = async (c: Parameters<typeof getServiceClient>[0]
 
 employerRoutes.use('/jobs*', requireApprovedEmployer);
 employerRoutes.use('/credits*', requireApprovedEmployer);
+employerRoutes.use('/candidates*', requireApprovedEmployer);
+employerRoutes.use('/unlocked*', requireApprovedEmployer);
 
 employerRoutes.get('/onboarding', (c) =>
   c.html(
@@ -282,4 +285,112 @@ employerRoutes.post('/credits/checkout/:pack', async (c) => {
       400,
     );
   }
+});
+
+
+employerRoutes.get('/candidates', async (c) => {
+  const countryQuery = c.req.query('country');
+  const country = countryQuery === 'US' || countryQuery === 'CA' ? countryQuery : null;
+  const minimumYears = Number.parseInt(c.req.query('minYears') ?? '', 10);
+  const { data, error } = await getUserClient(c).rpc('search_candidates', {
+    p_query: c.req.query('q') || null,
+    p_country: country,
+    p_state: c.req.query('state') || null,
+    p_city: c.req.query('city') || null,
+    p_min_years: Number.isFinite(minimumYears) ? minimumYears : null,
+    p_limit: 20,
+    p_offset: 0,
+  });
+  if (error) return c.json({ error: error.message }, 403);
+
+  return c.html(
+    <Layout title="Candidate search">
+      <h1>Candidate search</h1>
+      <form method="get" action="/employer/candidates" class="card form-stack">
+        <Field label="Keywords" name="q"><input id="q" name="q" value={c.req.query('q') ?? ''} /></Field>
+        <Field label="Country" name="country">
+          <select id="country" name="country">
+            <option value="">Any</option>
+            <option value="US" selected={country === 'US'}>United States</option>
+            <option value="CA" selected={country === 'CA'}>Canada</option>
+          </select>
+        </Field>
+        <Field label="State or province" name="state"><input id="state" name="state" value={c.req.query('state') ?? ''} /></Field>
+        <Field label="City" name="city"><input id="city" name="city" value={c.req.query('city') ?? ''} /></Field>
+        <Field label="Minimum years of experience" name="minYears"><input id="minYears" name="minYears" type="number" min="0" value={c.req.query('minYears') ?? ''} /></Field>
+        <button>Search</button>
+      </form>
+      <p>Names and contact details stay hidden until the candidate is unlocked.</p>
+      <ul class="job-list">
+        {(data ?? []).map((candidate) => (
+          <li class="card">
+            <h2>{candidate.initials} — {candidate.headline}</h2>
+            <p>{candidate.city}, {candidate.state_province}, {candidate.country}</p>
+            <p>{candidate.years_experience} years experience</p>
+            <p>{candidate.summary}</p>
+            <p>{candidate.skills.join(' · ')}</p>
+            <form method="post" action={`/employer/candidates/${candidate.candidate_id}/unlock`}>
+              <button>Unlock contact — 1 credit</button>
+            </form>
+          </li>
+        ))}
+      </ul>
+    </Layout>,
+  );
+});
+
+employerRoutes.post('/candidates/:id/unlock', async (c) => {
+  try {
+    const result = await unlockCandidate(c, c.req.param('id'));
+    return c.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unlock_failed';
+    return c.json(
+      { error: message },
+      message.includes('insufficient_credits') ? 402 : 400,
+    );
+  }
+});
+
+employerRoutes.get('/candidates/:id', async (c) => {
+  try {
+    const candidate = await getAuthorizedCandidate(
+      c,
+      c.get('sessionUser')!.id,
+      c.req.param('id'),
+    );
+    return candidate
+      ? c.json({ candidate })
+      : c.json({ error: 'candidate_locked' }, 403);
+  } catch {
+    return c.json({ error: 'candidate_unavailable' }, 500);
+  }
+});
+
+employerRoutes.get('/unlocked', async (c) => {
+  const employerId = c.get('sessionUser')!.id;
+  const service = getServiceClient(c);
+  const { data: unlocks, error } = await service
+    .from('contact_unlocks')
+    .select('candidate_id,source,unlocked_at')
+    .eq('employer_id', employerId)
+    .order('unlocked_at', { ascending: false });
+  if (error) return c.json({ error: 'unlocked_candidates_unavailable' }, 500);
+
+  const candidates = await Promise.all(
+    (unlocks ?? []).map(async (unlock) => {
+      const candidate = await getAuthorizedCandidate(c, employerId, unlock.candidate_id);
+      return candidate
+        ? {
+            candidateId: unlock.candidate_id,
+            source: unlock.source,
+            unlockedAt: unlock.unlocked_at,
+            fullName: candidate.full_name,
+            headline: candidate.headline,
+            email: candidate.email,
+          }
+        : null;
+    }),
+  );
+  return c.json({ candidates: candidates.filter(Boolean) });
 });

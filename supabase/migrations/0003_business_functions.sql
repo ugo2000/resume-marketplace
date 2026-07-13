@@ -400,3 +400,196 @@ grant execute on function public.can_refund_credit_purchase(uuid) to service_rol
 grant execute on function public.reserve_credit_refund(uuid) to service_role;
 grant execute on function public.cancel_credit_refund(uuid) to service_role;
 grant execute on function public.refund_credit_purchase(uuid) to service_role;
+
+create or replace function public.search_candidates(
+  p_query text default null,
+  p_country public.country_code default null,
+  p_state text default null,
+  p_city text default null,
+  p_min_years integer default null,
+  p_limit integer default 20,
+  p_offset integer default 0
+)
+returns table (
+  candidate_id uuid,
+  initials text,
+  headline text,
+  summary text,
+  years_experience integer,
+  city text,
+  state_province text,
+  country public.country_code,
+  work_authorization text,
+  skills text[]
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.employer_profiles
+    where user_id = auth.uid() and review_status = 'approved'
+  ) then
+    raise exception 'employer_not_approved';
+  end if;
+
+  return query
+  select
+    cp.user_id,
+    case
+      when position(' ' in trim(cp.full_name)) > 0 then
+        upper(left(split_part(trim(cp.full_name), ' ', 1), 1)) || '. ' ||
+        upper(left(regexp_replace(trim(cp.full_name), '^.* ', ''), 1)) || '.'
+      else upper(left(trim(cp.full_name), 1)) || '.'
+    end,
+    cp.headline,
+    cp.summary,
+    cp.years_experience,
+    cp.city,
+    cp.state_province,
+    cp.country,
+    cp.work_authorization,
+    coalesce(
+      array(
+        select distinct cs.skill_name
+        from public.candidate_skills cs
+        where cs.candidate_id = cp.user_id
+        order by cs.skill_name
+      ),
+      array[]::text[]
+    )
+  from public.candidate_profiles cp
+  join public.users u on u.id = cp.user_id
+  where cp.searchable = true
+    and cp.identity_status = 'verified'
+    and cp.date_of_birth_confirmed = true
+    and u.status = 'active'
+    and (p_country is null or cp.country = p_country)
+    and (p_state is null or cp.state_province ilike p_state)
+    and (p_city is null or cp.city ilike p_city)
+    and (p_min_years is null or cp.years_experience >= greatest(p_min_years, 0))
+    and (
+      nullif(trim(p_query), '') is null
+      or cp.headline ilike '%' || trim(p_query) || '%'
+      or cp.summary ilike '%' || trim(p_query) || '%'
+      or exists (
+        select 1 from public.candidate_skills cs
+        where cs.candidate_id = cp.user_id
+          and cs.skill_name ilike '%' || trim(p_query) || '%'
+      )
+    )
+  order by cp.updated_at desc
+  limit least(greatest(p_limit, 1), 50)
+  offset greatest(p_offset, 0);
+end;
+$$;
+
+create or replace function public.unlock_candidate(p_candidate_id uuid)
+returns table (source public.unlock_source, available_credits integer)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employer_id uuid := auth.uid();
+  v_wallet public.credit_wallets;
+  v_tx uuid;
+  v_source public.unlock_source;
+begin
+  if not exists (
+    select 1 from public.employer_profiles
+    where user_id = v_employer_id and review_status = 'approved'
+  ) then
+    raise exception 'employer_not_approved';
+  end if;
+
+  if not exists (
+    select 1
+    from public.candidate_profiles cp
+    join public.users u on u.id = cp.user_id
+    where cp.user_id = p_candidate_id
+      and cp.searchable = true
+      and cp.identity_status = 'verified'
+      and cp.date_of_birth_confirmed = true
+      and u.status = 'active'
+  ) then
+    raise exception 'candidate_unavailable';
+  end if;
+
+  select cu.source into v_source
+  from public.contact_unlocks cu
+  where cu.employer_id = v_employer_id
+    and cu.candidate_id = p_candidate_id;
+
+  if v_source is not null then
+    return query
+      select v_source, coalesce(cw.available_credits, 0)
+      from (select 1) singleton
+      left join public.credit_wallets cw on cw.employer_id = v_employer_id;
+    return;
+  end if;
+
+  if exists (
+    select 1
+    from public.applications a
+    join public.jobs j on j.id = a.job_id
+    where a.candidate_id = p_candidate_id
+      and j.employer_id = v_employer_id
+  ) then
+    insert into public.contact_unlocks (employer_id, candidate_id, source)
+    values (v_employer_id, p_candidate_id, 'application')
+    on conflict (employer_id, candidate_id) do nothing;
+
+    return query
+      select 'application'::public.unlock_source, coalesce(cw.available_credits, 0)
+      from (select 1) singleton
+      left join public.credit_wallets cw on cw.employer_id = v_employer_id;
+    return;
+  end if;
+
+  select * into v_wallet
+  from public.credit_wallets
+  where employer_id = v_employer_id
+  for update;
+
+  if v_wallet.employer_id is null or v_wallet.available_credits < 1 then
+    raise exception 'insufficient_credits';
+  end if;
+
+  select cu.source into v_source
+  from public.contact_unlocks cu
+  where cu.employer_id = v_employer_id
+    and cu.candidate_id = p_candidate_id;
+
+  if v_source is not null then
+    return query select v_source, v_wallet.available_credits;
+    return;
+  end if;
+
+  update public.credit_wallets
+  set available_credits = available_credits - 1,
+      used_credits = used_credits + 1,
+      updated_at = now()
+  where employer_id = v_employer_id;
+
+  insert into public.credit_transactions (employer_id, type, quantity)
+  values (v_employer_id, 'unlock', -1)
+  returning id into v_tx;
+
+  insert into public.contact_unlocks (
+    employer_id, candidate_id, source, credit_transaction_id
+  )
+  values (v_employer_id, p_candidate_id, 'paid_search', v_tx);
+
+  return query
+    select 'paid_search'::public.unlock_source, cw.available_credits
+    from public.credit_wallets cw
+    where cw.employer_id = v_employer_id;
+end;
+$$;
+
+revoke all on function public.search_candidates(text, public.country_code, text, text, integer, integer, integer) from public, anon;
+revoke all on function public.unlock_candidate(uuid) from public, anon;
+grant execute on function public.search_candidates(text, public.country_code, text, text, integer, integer, integer) to authenticated;
+grant execute on function public.unlock_candidate(uuid) to authenticated;
