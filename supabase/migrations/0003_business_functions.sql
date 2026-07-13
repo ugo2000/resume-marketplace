@@ -593,3 +593,18 @@ revoke all on function public.search_candidates(text, public.country_code, text,
 revoke all on function public.unlock_candidate(uuid) from public, anon;
 grant execute on function public.search_candidates(text, public.country_code, text, text, integer, integer, integer) to authenticated;
 grant execute on function public.unlock_candidate(uuid) to authenticated;
+
+create or replace function public.prevent_audit_log_mutation()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  raise exception 'audit_logs_are_immutable';
+end;
+$$;
+
+drop trigger if exists audit_logs_are_immutable on public.audit_logs;
+create trigger audit_logs_are_immutable
+before update or delete on public.audit_logs
+for each row execute function public.prevent_audit_log_mutation();

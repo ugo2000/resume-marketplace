@@ -104,3 +104,31 @@ publicRoutes.get('/for-employers', (c) => c.html(<Layout title="For employers"><
 publicRoutes.get('/privacy', (c) => c.html(<Layout title="Privacy"><h1>Privacy</h1><p>Candidate profiles are private and available only to approved employers. Government ID and selfie images are processed by the identity provider and are not stored by this platform.</p></Layout>));
 publicRoutes.get('/terms', (c) => c.html(<Layout title="Terms"><h1>Terms</h1><p>Employers must post lawful, genuine employment opportunities. Final public terms require qualified US and Canadian legal review before launch.</p></Layout>));
 publicRoutes.get('/identity-verification', (c) => c.html(<Layout title="Identity verification"><h1>Identity verification</h1><p>Candidates pay $2.49 USD once and complete third-party identity verification before publishing a resume or applying.</p></Layout>));
+
+
+publicRoutes.post('/reports', async (c) => {
+  const user = c.get('sessionUser');
+  if (!user || user.status !== 'active') {
+    return c.json({ error: 'authentication_required' }, 401);
+  }
+  const body = await c.req.parseBody();
+  const targetType = String(body.targetType ?? '').trim();
+  const targetId = String(body.targetId ?? '').trim();
+  const reason = String(body.reason ?? '').trim();
+  if (!['job', 'candidate', 'employer'].includes(targetType)) {
+    return c.json({ error: 'invalid_report_target' }, 400);
+  }
+  if (!targetId || reason.length < 10 || reason.length > 2000) {
+    return c.json({ error: 'invalid_report' }, 400);
+  }
+
+  const { error } = await getServiceClient(c).from('reports').insert({
+    reporter_user_id: user.id,
+    target_type: targetType,
+    target_id: targetId,
+    reason,
+  });
+  return error
+    ? c.json({ error: 'report_failed' }, 400)
+    : c.json({ ok: true }, 201);
+});

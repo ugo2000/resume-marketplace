@@ -185,7 +185,15 @@ export type Database = {
         event_type: string;
         processed_at: string;
       }>;
-      audit_logs: Table<Record<string, unknown>>;
+      audit_logs: Table<{
+        id: number;
+        actor_user_id: string | null;
+        action: string;
+        target_type: string;
+        target_id: string;
+        metadata: Json;
+        created_at: string;
+      }>;
       reports: Table<{
         id: string;
         reporter_user_id: string | null;
