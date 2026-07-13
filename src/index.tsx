@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Bindings } from './env';
 import { authMiddleware } from './middleware/auth';
 import { authRoutes } from './routes/auth';
+import { candidateRoutes } from './routes/candidate';
 import { publicRoutes } from './routes/public';
 import type { AppVariables } from './types/app';
 
@@ -12,6 +13,7 @@ app.get('/health', (c) =>
 );
 app.use('*', authMiddleware);
 app.route('/auth', authRoutes);
+app.route('/candidate', candidateRoutes);
 app.route('/', publicRoutes);
 
 export default app;

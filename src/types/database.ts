@@ -35,11 +35,56 @@ export type Database = {
         created_at?: string;
         updated_at?: string;
       }>;
-      candidate_profiles: Table<Record<string, unknown>>;
-      candidate_skills: Table<Record<string, unknown>>;
-      candidate_experience: Table<Record<string, unknown>>;
-      candidate_education: Table<Record<string, unknown>>;
-      resume_files: Table<Record<string, unknown>>;
+      candidate_profiles: Table<{
+        user_id: string;
+        full_name: string;
+        city: string;
+        state_province: string;
+        country: Database['public']['Enums']['country_code'];
+        phone: string | null;
+        headline: string;
+        summary: string;
+        years_experience: number;
+        work_authorization: string;
+        searchable: boolean;
+        identity_status: Database['public']['Enums']['identity_status'];
+        identity_reference_id: string | null;
+        identity_verified_at: string | null;
+        date_of_birth_confirmed: boolean;
+        created_at: string;
+        updated_at: string;
+      }>;
+      candidate_skills: Table<{
+        id: string;
+        candidate_id: string;
+        skill_name: string;
+        years_experience: number;
+      }>;
+      candidate_experience: Table<{
+        id: string;
+        candidate_id: string;
+        company: string;
+        job_title: string;
+        start_date: string;
+        end_date: string | null;
+        description: string;
+      }>;
+      candidate_education: Table<{
+        id: string;
+        candidate_id: string;
+        school: string;
+        qualification: string;
+        field: string;
+        graduation_year: number | null;
+      }>;
+      resume_files: Table<{
+        candidate_id: string;
+        storage_path: string;
+        original_filename: string;
+        mime_type: string;
+        size_bytes: number;
+        uploaded_at: string;
+      }>;
       employer_profiles: Table<Record<string, unknown>>;
       employer_documents: Table<Record<string, unknown>>;
       jobs: Table<{
@@ -61,7 +106,14 @@ export type Database = {
         created_at: string;
         updated_at: string;
       }>;
-      applications: Table<Record<string, unknown>>;
+      applications: Table<{
+        id: string;
+        job_id: string;
+        candidate_id: string;
+        cover_note: string | null;
+        status: string;
+        applied_at: string;
+      }>;
       credit_wallets: Table<{ employer_id: string; available_credits: number; purchased_credits: number; used_credits: number; updated_at: string }>;
       payments: Table<Record<string, unknown>>;
       credit_transactions: Table<Record<string, unknown>>;
