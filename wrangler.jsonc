@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "resume-marketplace",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-07-13",
+  "assets": { "directory": "./public" },
+  "triggers": { "crons": ["15 3 * * *"] },
+  "env": {
+    "staging": {
+      "name": "resume-marketplace-staging"
+    }
+  }
+}

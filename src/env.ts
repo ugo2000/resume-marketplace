@@ -1,0 +1,19 @@
+export type Bindings = {
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+  SUPABASE_SERVICE_ROLE_KEY: string;
+  STRIPE_SECRET_KEY: string;
+  STRIPE_WEBHOOK_SECRET: string;
+  STRIPE_IDENTITY_WEBHOOK_SECRET: string;
+  STRIPE_IDENTITY_PRICE_ID: string;
+  STRIPE_CREDITS_10_PRICE_ID: string;
+  STRIPE_CREDITS_25_PRICE_ID: string;
+  APP_ORIGIN: string;
+  EMAIL_API_URL: string;
+  EMAIL_API_KEY: string;
+  EMAIL_FROM: string;
+  TURNSTILE_SITE_KEY: string;
+  TURNSTILE_SECRET_KEY: string;
+  CRON_SECRET: string;
+  E2E_TEST_TOKEN?: string;
+};
