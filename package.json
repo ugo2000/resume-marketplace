@@ -10,7 +10,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "test:e2e:list": "playwright test --list",
+    "deploy:staging": "wrangler deploy --env staging",
+    "supabase:types": "supabase gen types typescript --project-id \"$SUPABASE_PROJECT_REF\" > src/types/database.ts",
+    "supabase:reset": "supabase db reset"
   },
   "dependencies": {
     "@hono/zod-validator": "latest",

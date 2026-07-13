@@ -248,6 +248,18 @@ employerRoutes.get('/credits', async (c) => {
       .limit(100),
   ]);
 
+  if (c.req.header('accept')?.includes('application/json')) {
+    return c.json({
+      wallet: wallet ?? {
+        available_credits: 0,
+        purchased_credits: 0,
+        used_credits: 0,
+        updated_at: null,
+      },
+      ledger: ledger ?? [],
+    });
+  }
+
   return c.html(
     <Layout title="Employer credits">
       <h1>Candidate lookup credits</h1>
@@ -319,6 +331,9 @@ employerRoutes.get('/candidates', async (c) => {
     p_offset: 0,
   });
   if (error) return c.json({ error: error.message }, 403);
+  if (c.req.header('accept')?.includes('application/json')) {
+    return c.json({ candidates: data ?? [] });
+  }
 
   return c.html(
     <Layout title="Candidate search">
