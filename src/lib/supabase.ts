@@ -21,3 +21,9 @@ export const getServiceClient = (c: AppContext) =>
   createClient<Database>(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+
+export const getServiceClientFromEnv = (env: Bindings) =>
+  createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });

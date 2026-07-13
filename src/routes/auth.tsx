@@ -3,6 +3,7 @@ import { deleteCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import type { Bindings } from '../env';
 import { getServiceClient, getUserClient } from '../lib/supabase';
+import { restoreCandidateAccount } from '../services/cleanup-service';
 import type { AppVariables } from '../types/app';
 
 const credentialsSchema = z.object({
@@ -115,4 +116,18 @@ authRoutes.post('/logout', (c) => {
   deleteCookie(c, 'sb-access-token', { path: '/' });
   deleteCookie(c, 'sb-refresh-token', { path: '/' });
   return c.json({ ok: true });
+});
+
+
+authRoutes.post('/restore-account', async (c) => {
+  const user = c.get('sessionUser');
+  if (!user || user.role !== 'candidate' || user.status !== 'disabled') {
+    return c.json({ error: 'disabled_candidate_required' }, 403);
+  }
+  try {
+    await restoreCandidateAccount(c, user.id);
+    return c.json({ ok: true });
+  } catch {
+    return c.json({ error: 'restoration_window_closed' }, 400);
+  }
 });

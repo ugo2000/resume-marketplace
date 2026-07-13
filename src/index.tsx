@@ -7,9 +7,10 @@ import { candidateRoutes } from './routes/candidate';
 import { employerRoutes } from './routes/employer';
 import { publicRoutes } from './routes/public';
 import { webhookRoutes } from './routes/webhooks';
+import { runDailyCleanup } from './services/cleanup-service';
 import type { AppVariables } from './types/app';
 
-const app = new Hono<{ Bindings: Bindings; Variables: AppVariables }>();
+export const app = new Hono<{ Bindings: Bindings; Variables: AppVariables }>();
 
 app.get('/health', (c) =>
   c.json({ ok: true, service: 'resume-marketplace' as const }),
@@ -22,4 +23,11 @@ app.route('/employer', employerRoutes);
 app.route('/admin', adminRoutes);
 app.route('/', publicRoutes);
 
-export default app;
+const worker: ExportedHandler<Bindings> = {
+  fetch: app.fetch,
+  scheduled: async (_controller, env, ctx) => {
+    ctx.waitUntil(runDailyCleanup(env));
+  },
+};
+
+export default worker;

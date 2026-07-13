@@ -15,6 +15,7 @@ import {
   saveCandidateResume,
 } from '../services/candidate-service';
 import { applyToJob } from '../services/application-service';
+import { requestCandidateDeletion } from '../services/cleanup-service';
 import { createIdentityCheckout } from '../services/payment-service';
 import type { AppVariables } from '../types/app';
 
@@ -275,4 +276,24 @@ candidateRoutes.get('/applications', async (c) => {
     : c.json({ applications: data });
 });
 
-candidateRoutes.get('/settings', (c) => c.html(<Layout title="Candidate settings"><h1>Candidate settings</h1><a href="/candidate/delete-account">Delete account</a></Layout>));
+candidateRoutes.get('/settings', (c) => c.html(
+  <Layout title="Candidate settings">
+    <h1>Candidate settings</h1>
+    <section class="card">
+      <h2>Delete account</h2>
+      <p>Your account is disabled immediately. You may restore it for 30 days before personal resume data is deleted.</p>
+      <form method="post" action="/candidate/delete-account">
+        <button>Start account deletion</button>
+      </form>
+    </section>
+  </Layout>,
+));
+
+candidateRoutes.post('/delete-account', async (c) => {
+  try {
+    const restoreUntil = await requestCandidateDeletion(c, c.get('sessionUser')!.id);
+    return c.json({ ok: true, restoreDays: 30, restoreUntil: restoreUntil.toISOString() });
+  } catch {
+    return c.json({ error: 'account_deletion_request_failed' }, 500);
+  }
+});

@@ -204,7 +204,12 @@ export type Database = {
         created_at: string;
         resolved_at: string | null;
       }>;
-      account_deletion_requests: Table<Record<string, unknown>>;
+      account_deletion_requests: Table<{
+        user_id: string;
+        requested_at: string;
+        restore_until: string;
+        completed_at: string | null;
+      }>;
     };
     Views: Record<never, never>;
     Functions: {
@@ -269,6 +274,18 @@ export type Database = {
           source: Database['public']['Enums']['unlock_source'];
           available_credits: number;
         }[];
+      };
+      expire_jobs: {
+        Args: Record<never, never>;
+        Returns: number;
+      };
+      complete_candidate_deletions: {
+        Args: Record<never, never>;
+        Returns: { user_id: string; resume_path: string | null }[];
+      };
+      documents_due_for_deletion: {
+        Args: Record<never, never>;
+        Returns: { document_id: string; storage_path: string }[];
       };
     };
     Enums: {
