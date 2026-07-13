@@ -42,7 +42,25 @@ export type Database = {
       resume_files: Table<Record<string, unknown>>;
       employer_profiles: Table<Record<string, unknown>>;
       employer_documents: Table<Record<string, unknown>>;
-      jobs: Table<Record<string, unknown>>;
+      jobs: Table<{
+        id: string;
+        employer_id: string;
+        slug: string;
+        title: string;
+        description: string;
+        city: string;
+        state_province: string;
+        country: Database['public']['Enums']['country_code'];
+        employment_type: string;
+        workplace_type: string;
+        salary_min: number | null;
+        salary_max: number | null;
+        status: Database['public']['Enums']['job_status'];
+        published_at: string | null;
+        expires_at: string | null;
+        created_at: string;
+        updated_at: string;
+      }>;
       applications: Table<Record<string, unknown>>;
       credit_wallets: Table<{ employer_id: string; available_credits: number; purchased_credits: number; used_credits: number; updated_at: string }>;
       payments: Table<Record<string, unknown>>;
