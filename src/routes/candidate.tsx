@@ -14,6 +14,7 @@ import {
   replaceResumePdf,
   saveCandidateResume,
 } from '../services/candidate-service';
+import { applyToJob } from '../services/application-service';
 import { createIdentityCheckout } from '../services/payment-service';
 import type { AppVariables } from '../types/app';
 
@@ -251,6 +252,16 @@ candidateRoutes.post('/resume/pdf', async (c) => {
   if (!(body.resume instanceof File)) return c.json({ error: 'pdf_required' }, 400);
   await replaceResumePdf(c, c.get('sessionUser')!.id, body.resume);
   return c.json({ ok: true });
+});
+
+candidateRoutes.post('/apply/:jobId', async (c) => {
+  const body = await c.req.parseBody();
+  try {
+    const result = await applyToJob(c, c.req.param('jobId'), String(body.coverNote ?? ''));
+    return c.json({ ok: true, ...result }, 201);
+  } catch {
+    return c.json({ error: 'application_not_allowed_or_duplicate' }, 400);
+  }
 });
 
 candidateRoutes.get('/applications', async (c) => {

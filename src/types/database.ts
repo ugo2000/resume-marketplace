@@ -206,6 +206,10 @@ export type Database = {
         Args: { p_job_id: string };
         Returns: Database['public']['Tables']['jobs']['Row'];
       };
+      apply_to_job: {
+        Args: { p_job_id: string; p_cover_note?: string | null };
+        Returns: { application_id: string; employer_id: string }[];
+      };
     };
     Enums: {
       user_role: 'candidate' | 'employer' | 'admin';

@@ -127,3 +127,58 @@ revoke all on function public.publish_job(uuid) from public, anon;
 revoke all on function public.renew_job(uuid) from public, anon;
 grant execute on function public.publish_job(uuid) to authenticated;
 grant execute on function public.renew_job(uuid) to authenticated;
+
+create or replace function public.apply_to_job(
+  p_job_id uuid,
+  p_cover_note text default null
+)
+returns table(application_id uuid, employer_id uuid)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_candidate_id uuid := auth.uid();
+  v_employer_id uuid;
+  v_application_id uuid;
+begin
+  if v_candidate_id is null then
+    raise exception 'authentication_required';
+  end if;
+
+  if not exists (
+    select 1 from public.candidate_profiles
+    where user_id = v_candidate_id
+      and identity_status = 'verified'
+      and date_of_birth_confirmed = true
+  ) then
+    raise exception 'candidate_not_verified';
+  end if;
+
+  select jobs.employer_id into v_employer_id
+  from public.jobs
+  where jobs.id = p_job_id
+    and jobs.status = 'published'
+    and jobs.expires_at > now()
+  for update;
+
+  if v_employer_id is null then
+    raise exception 'job_not_open';
+  end if;
+
+  insert into public.applications (job_id, candidate_id, cover_note)
+  values (p_job_id, v_candidate_id, nullif(trim(p_cover_note), ''))
+  returning id into v_application_id;
+
+  insert into public.contact_unlocks (
+    employer_id, candidate_id, source, credit_transaction_id
+  )
+  values (v_employer_id, v_candidate_id, 'application', null)
+  on conflict (employer_id, candidate_id) do nothing;
+
+  return query select v_application_id, v_employer_id;
+end;
+$$;
+
+revoke all on function public.apply_to_job(uuid, text) from public, anon;
+grant execute on function public.apply_to_job(uuid, text) to authenticated;

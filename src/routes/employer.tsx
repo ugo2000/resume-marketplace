@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { Field } from '../components/forms';
 import { Layout } from '../components/layout';
 import type { Bindings } from '../env';
+import { createResumeSignedUrl } from '../lib/signed-files';
 import { getServiceClient, getUserClient } from '../lib/supabase';
 import { requireRole } from '../middleware/role';
 import { submitEmployerReview } from '../services/employer-service';
@@ -169,4 +170,46 @@ employerRoutes.post('/jobs/:id/publish', async (c) => {
 employerRoutes.post('/jobs/:id/renew', async (c) => {
   const { data, error } = await getUserClient(c).rpc('renew_job', { p_job_id: c.req.param('id') });
   return error ? c.json({ error: error.message }, 400) : c.json({ job: data });
+});
+
+
+employerRoutes.get('/applications', async (c) => {
+  const employerId = c.get('sessionUser')!.id;
+  const service = getServiceClient(c);
+  const { data: jobs } = await service
+    .from('jobs')
+    .select('id,title')
+    .eq('employer_id', employerId);
+  const jobIds = (jobs ?? []).map((job) => job.id);
+  if (jobIds.length === 0) return c.json({ applications: [] });
+
+  const { data: applications, error } = await service
+    .from('applications')
+    .select('id,job_id,candidate_id,status,cover_note,applied_at')
+    .in('job_id', jobIds)
+    .order('applied_at', { ascending: false });
+  if (error) return c.json({ error: 'applications_unavailable' }, 500);
+
+  const candidateIds = [...new Set((applications ?? []).map((item) => item.candidate_id))];
+  const [{ data: profiles }, { data: users }, { data: files }] = await Promise.all([
+    service.from('candidate_profiles').select('user_id,full_name,phone,headline').in('user_id', candidateIds),
+    service.from('users').select('id,email').in('id', candidateIds),
+    service.from('resume_files').select('candidate_id,storage_path').in('candidate_id', candidateIds),
+  ]);
+  const jobsById = new Map((jobs ?? []).map((job) => [job.id, job]));
+  const profilesById = new Map((profiles ?? []).map((profile) => [profile.user_id, profile]));
+  const usersById = new Map((users ?? []).map((user) => [user.id, user]));
+  const filesById = new Map((files ?? []).map((file) => [file.candidate_id, file]));
+
+  const output = await Promise.all((applications ?? []).map(async (application) => {
+    const file = filesById.get(application.candidate_id);
+    return {
+      ...application,
+      job: jobsById.get(application.job_id) ?? null,
+      candidate: profilesById.get(application.candidate_id) ?? null,
+      email: usersById.get(application.candidate_id)?.email ?? null,
+      resumeUrl: file ? await createResumeSignedUrl(c, file.storage_path) : null,
+    };
+  }));
+  return c.json({ applications: output });
 });
