@@ -210,6 +210,22 @@ export type Database = {
         Args: { p_job_id: string; p_cover_note?: string | null };
         Returns: { application_id: string; employer_id: string }[];
       };
+      can_refund_credit_purchase: {
+        Args: { p_payment_id: string };
+        Returns: boolean;
+      };
+      reserve_credit_refund: {
+        Args: { p_payment_id: string };
+        Returns: undefined;
+      };
+      cancel_credit_refund: {
+        Args: { p_payment_id: string };
+        Returns: undefined;
+      };
+      refund_credit_purchase: {
+        Args: { p_payment_id: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       user_role: 'candidate' | 'employer' | 'admin';

@@ -182,3 +182,221 @@ $$;
 
 revoke all on function public.apply_to_job(uuid, text) from public, anon;
 grant execute on function public.apply_to_job(uuid, text) to authenticated;
+
+create unique index if not exists credit_transactions_payment_type_unique
+on public.credit_transactions (payment_id, type)
+where payment_id is not null;
+
+create or replace function public.can_refund_credit_purchase(p_payment_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employer uuid;
+  v_quantity integer;
+  v_available integer;
+begin
+  select ct.employer_id, ct.quantity
+  into v_employer, v_quantity
+  from public.credit_transactions ct
+  where ct.payment_id = p_payment_id
+    and ct.type = 'purchase';
+
+  if v_employer is null then
+    return false;
+  end if;
+
+  select available_credits
+  into v_available
+  from public.credit_wallets
+  where employer_id = v_employer;
+
+  return coalesce(v_available, 0) >= v_quantity
+    and not exists (
+      select 1
+      from public.credit_transactions
+      where payment_id = p_payment_id
+        and type = 'refund'
+    );
+end;
+$$;
+
+create or replace function public.reserve_credit_refund(p_payment_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employer uuid;
+  v_quantity integer;
+  v_wallet public.credit_wallets;
+begin
+  if exists (
+    select 1 from public.credit_transactions
+    where payment_id = p_payment_id and type = 'refund'
+  ) then
+    return;
+  end if;
+
+  select employer_id, quantity
+  into v_employer, v_quantity
+  from public.credit_transactions
+  where payment_id = p_payment_id and type = 'purchase';
+
+  if v_employer is null then
+    raise exception 'credit_purchase_not_found';
+  end if;
+
+  select * into v_wallet
+  from public.credit_wallets
+  where employer_id = v_employer
+  for update;
+
+  if v_wallet.employer_id is null then
+    raise exception 'credit_wallet_not_found';
+  end if;
+
+  if v_wallet.available_credits < v_quantity then
+    raise exception 'used_credits_non_refundable';
+  end if;
+
+  update public.credit_wallets
+  set available_credits = available_credits - v_quantity,
+      purchased_credits = purchased_credits - v_quantity,
+      updated_at = now()
+  where employer_id = v_employer;
+
+  insert into public.credit_transactions (
+    employer_id, type, quantity, payment_id, metadata
+  )
+  values (
+    v_employer,
+    'refund',
+    -v_quantity,
+    p_payment_id,
+    jsonb_build_object('status', 'pending')
+  );
+end;
+$$;
+
+create or replace function public.cancel_credit_refund(p_payment_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employer uuid;
+  v_quantity integer;
+begin
+  select employer_id, abs(quantity)
+  into v_employer, v_quantity
+  from public.credit_transactions
+  where payment_id = p_payment_id
+    and type = 'refund'
+    and metadata ->> 'status' = 'pending'
+  for update;
+
+  if v_employer is null then
+    return;
+  end if;
+
+  update public.credit_wallets
+  set available_credits = available_credits + v_quantity,
+      purchased_credits = purchased_credits + v_quantity,
+      updated_at = now()
+  where employer_id = v_employer;
+
+  delete from public.credit_transactions
+  where payment_id = p_payment_id
+    and type = 'refund'
+    and metadata ->> 'status' = 'pending';
+end;
+$$;
+
+create or replace function public.refund_credit_purchase(p_payment_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_employer uuid;
+  v_quantity integer;
+  v_refund_status text;
+  v_wallet public.credit_wallets;
+begin
+  select employer_id, abs(quantity), metadata ->> 'status'
+  into v_employer, v_quantity, v_refund_status
+  from public.credit_transactions
+  where payment_id = p_payment_id and type = 'refund'
+  for update;
+
+  if v_employer is not null and v_refund_status = 'completed' then
+    return;
+  end if;
+
+  if v_employer is null then
+    select employer_id, quantity
+    into v_employer, v_quantity
+    from public.credit_transactions
+    where payment_id = p_payment_id and type = 'purchase';
+
+    if v_employer is null then
+      raise exception 'credit_purchase_not_found';
+    end if;
+
+    select * into v_wallet
+    from public.credit_wallets
+    where employer_id = v_employer
+    for update;
+
+    if v_wallet.employer_id is null then
+      raise exception 'credit_wallet_not_found';
+    end if;
+
+    if v_wallet.available_credits < v_quantity then
+      raise exception 'used_credits_non_refundable';
+    end if;
+
+    update public.credit_wallets
+    set available_credits = available_credits - v_quantity,
+        purchased_credits = purchased_credits - v_quantity,
+        updated_at = now()
+    where employer_id = v_employer;
+
+    insert into public.credit_transactions (
+      employer_id, type, quantity, payment_id, metadata
+    )
+    values (
+      v_employer,
+      'refund',
+      -v_quantity,
+      p_payment_id,
+      jsonb_build_object('status', 'completed')
+    )
+    on conflict (payment_id, type) where payment_id is not null
+    do update set metadata = jsonb_build_object('status', 'completed');
+  else
+    update public.credit_transactions
+    set metadata = jsonb_build_object('status', 'completed')
+    where payment_id = p_payment_id and type = 'refund';
+  end if;
+
+  update public.payments
+  set status = 'refunded', updated_at = now()
+  where id = p_payment_id;
+end;
+$$;
+
+revoke all on function public.can_refund_credit_purchase(uuid) from public, anon, authenticated;
+revoke all on function public.reserve_credit_refund(uuid) from public, anon, authenticated;
+revoke all on function public.cancel_credit_refund(uuid) from public, anon, authenticated;
+revoke all on function public.refund_credit_purchase(uuid) from public, anon, authenticated;
+grant execute on function public.can_refund_credit_purchase(uuid) to service_role;
+grant execute on function public.reserve_credit_refund(uuid) to service_role;
+grant execute on function public.cancel_credit_refund(uuid) to service_role;
+grant execute on function public.refund_credit_purchase(uuid) to service_role;

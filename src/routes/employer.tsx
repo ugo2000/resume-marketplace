@@ -5,6 +5,7 @@ import type { Bindings } from '../env';
 import { createResumeSignedUrl } from '../lib/signed-files';
 import { getServiceClient, getUserClient } from '../lib/supabase';
 import { requireRole } from '../middleware/role';
+import { createCreditCheckout } from '../services/credit-service';
 import { submitEmployerReview } from '../services/employer-service';
 import { createJobSlug, jobDraftSchema } from '../services/job-service';
 import type { AppVariables } from '../types/app';
@@ -29,6 +30,7 @@ const requireApprovedEmployer = async (c: Parameters<typeof getServiceClient>[0]
 };
 
 employerRoutes.use('/jobs*', requireApprovedEmployer);
+employerRoutes.use('/credits*', requireApprovedEmployer);
 
 employerRoutes.get('/onboarding', (c) =>
   c.html(
@@ -212,4 +214,72 @@ employerRoutes.get('/applications', async (c) => {
     };
   }));
   return c.json({ applications: output });
+});
+
+
+employerRoutes.get('/credits', async (c) => {
+  const employerId = c.get('sessionUser')!.id;
+  const service = getServiceClient(c);
+  const [{ data: wallet }, { data: ledger }] = await Promise.all([
+    service
+      .from('credit_wallets')
+      .select('available_credits,purchased_credits,used_credits,updated_at')
+      .eq('employer_id', employerId)
+      .maybeSingle(),
+    service
+      .from('credit_transactions')
+      .select('id,type,quantity,created_at,metadata')
+      .eq('employer_id', employerId)
+      .order('created_at', { ascending: false })
+      .limit(100),
+  ]);
+
+  return c.html(
+    <Layout title="Employer credits">
+      <h1>Candidate lookup credits</h1>
+      <div class="card">
+        <p><strong>{wallet?.available_credits ?? 0}</strong> credits available</p>
+        <p>Credits never expire. One credit permanently unlocks one candidate.</p>
+      </div>
+      <div class="grid">
+        <form method="post" action="/employer/credits/checkout/10" class="card">
+          <h2>10 lookups</h2>
+          <p>USD $30.00</p>
+          <button>Buy 10 credits</button>
+        </form>
+        <form method="post" action="/employer/credits/checkout/25" class="card">
+          <h2>25 lookups</h2>
+          <p>USD $75.00</p>
+          <button>Buy 25 credits</button>
+        </form>
+      </div>
+      <h2>Ledger</h2>
+      <ul class="job-list">
+        {(ledger ?? []).map((entry) => (
+          <li class="card">
+            <strong>{entry.type}</strong>
+            <span>{entry.quantity > 0 ? '+' : ''}{entry.quantity} credits</span>
+            <span>{entry.created_at.slice(0, 10)}</span>
+          </li>
+        ))}
+      </ul>
+    </Layout>,
+  );
+});
+
+employerRoutes.post('/credits/checkout/:pack', async (c) => {
+  try {
+    const session = await createCreditCheckout(
+      c,
+      c.get('sessionUser')!.id,
+      c.req.param('pack'),
+    );
+    if (!session.url) return c.json({ error: 'checkout_url_missing' }, 502);
+    return c.redirect(session.url, 303);
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : 'credit_checkout_failed' },
+      400,
+    );
+  }
 });

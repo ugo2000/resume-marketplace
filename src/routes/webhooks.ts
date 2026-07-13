@@ -96,6 +96,35 @@ webhookRoutes.post('/stripe', async (c) => {
     if (event.type === 'checkout.session.completed') {
       await processCheckout(c, event.data.object);
     }
+    if (event.type === 'charge.refunded') {
+      const charge = event.data.object;
+      const paymentIntentId = typeof charge.payment_intent === 'string'
+        ? charge.payment_intent
+        : null;
+      if (paymentIntentId) {
+        const service = getServiceClient(c);
+        const { data: payment, error: paymentError } = await service
+          .from('payments')
+          .select('id,purpose')
+          .eq('stripe_payment_intent_id', paymentIntentId)
+          .maybeSingle();
+        if (paymentError) throw paymentError;
+        if (payment) {
+          if (payment.purpose === 'credit_pack_10' || payment.purpose === 'credit_pack_25') {
+            const { error } = await service.rpc('refund_credit_purchase', {
+              p_payment_id: payment.id,
+            });
+            if (error) throw error;
+          } else {
+            const { error } = await service
+              .from('payments')
+              .update({ status: 'refunded', updated_at: new Date().toISOString() })
+              .eq('id', payment.id);
+            if (error) throw error;
+          }
+        }
+      }
+    }
     return c.json({ received: true });
   } catch {
     await releaseWebhookClaim(c, 'stripe', event.id);
