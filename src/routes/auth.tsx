@@ -3,6 +3,8 @@ import { deleteCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
 import type { Bindings } from '../env';
 import { getServiceClient, getUserClient } from '../lib/supabase';
+import { rateLimit } from '../middleware/rate-limit';
+import { verifyTurnstile } from '../middleware/turnstile';
 import { restoreCandidateAccount } from '../services/cleanup-service';
 import type { AppVariables } from '../types/app';
 
@@ -25,9 +27,16 @@ export const authRoutes = new Hono<{
   Variables: AppVariables;
 }>();
 
+authRoutes.use('/login', rateLimit('login', 10, 60, 'ip'));
+authRoutes.use('/register/*', rateLimit('registration', 5, 3600, 'ip'));
+
 authRoutes.post('/register/:role', async (c) => {
   const roleResult = roleSchema.safeParse(c.req.param('role'));
-  const inputResult = credentialsSchema.safeParse(await c.req.parseBody());
+  const body = await c.req.parseBody();
+  if (!(await verifyTurnstile(c, String(body['cf-turnstile-response'] ?? '')))) {
+    return c.json({ error: 'bot_check_failed' }, 400);
+  }
+  const inputResult = credentialsSchema.safeParse(body);
   if (!roleResult.success || !inputResult.success) {
     return c.json({ error: 'invalid_registration' }, 400);
   }
@@ -58,7 +67,11 @@ authRoutes.post('/register/:role', async (c) => {
 });
 
 authRoutes.post('/login', async (c) => {
-  const inputResult = credentialsSchema.safeParse(await c.req.parseBody());
+  const body = await c.req.parseBody();
+  if (!(await verifyTurnstile(c, String(body['cf-turnstile-response'] ?? '')))) {
+    return c.json({ error: 'bot_check_failed' }, 400);
+  }
+  const inputResult = credentialsSchema.safeParse(body);
   if (!inputResult.success) return c.json({ error: 'invalid_credentials' }, 401);
 
   const client = getUserClient(c);

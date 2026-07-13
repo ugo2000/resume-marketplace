@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type Stripe from 'stripe';
 import type { Bindings } from '../env';
+import { creditReceiptEmail, identityEmail, identityFeeReceiptEmail, queueEmail } from '../lib/email';
 import { getStripe } from '../lib/stripe';
 import { getServiceClient } from '../lib/supabase';
 import {
@@ -66,8 +67,22 @@ const processCheckout = async (
       .from('candidate_profiles')
       .update({ identity_status: 'payment_pending' })
       .eq('user_id', userId);
+    const { data: candidateUser } = await service
+      .from('users')
+      .select('email')
+      .eq('id', userId)
+      .maybeSingle();
+    if (candidateUser) queueEmail(c, identityFeeReceiptEmail(candidateUser.email));
   } else {
     await grantPurchasedCredits(c, userId, purpose, payment.id);
+    const { data: employerUser } = await service
+      .from('users')
+      .select('email')
+      .eq('id', userId)
+      .maybeSingle();
+    if (employerUser) {
+      queueEmail(c, creditReceiptEmail(employerUser.email, purpose === 'credit_pack_10' ? 10 : 25));
+    }
   }
 };
 
@@ -169,6 +184,12 @@ webhookRoutes.post('/stripe-identity', async (c) => {
         .from('candidate_profiles')
         .update({ identity_status: status, identity_verified_at: verifiedAt })
         .eq('user_id', candidateId);
+      const { data: candidateUser } = await service
+        .from('users')
+        .select('email')
+        .eq('id', candidateId)
+        .maybeSingle();
+      if (candidateUser) queueEmail(c, identityEmail(candidateUser.email, status));
     }
     return c.json({ received: true });
   } catch {

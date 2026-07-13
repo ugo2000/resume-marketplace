@@ -11,7 +11,7 @@ export const shouldProcessWebhook = async (
 
 export const identityStatusForEvent = (
   eventType: string,
-): Database['public']['Enums']['identity_status'] | null => {
+): 'verified' | 'requires_input' | null => {
   if (eventType === 'identity.verification_session.verified') return 'verified';
   if (eventType === 'identity.verification_session.requires_input') return 'requires_input';
   return null;

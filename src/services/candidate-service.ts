@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AppContext } from '../lib/supabase';
 import { getServiceClient } from '../lib/supabase';
+import { validateResumePdf } from '../lib/file-validation';
 
 export const candidateCanPublish = (profile: {
   date_of_birth_confirmed: boolean;
@@ -122,13 +123,14 @@ export const deleteCandidateSectionRow = async (
 ) => getServiceClient(c).from(section).delete().eq('id', rowId).eq('candidate_id', candidateId);
 
 export const validatePdf = async (file: File) => {
-  if (file.type !== 'application/pdf' || file.size < 1 || file.size > 5 * 1024 * 1024) {
-    throw new Error('invalid_pdf');
+  try {
+    return await validateResumePdf(file);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'unsupported_file_signature') {
+      throw new Error('invalid_pdf_signature');
+    }
+    throw error;
   }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const signature = new TextDecoder().decode(bytes.slice(0, 5));
-  if (signature !== '%PDF-') throw new Error('invalid_pdf_signature');
-  return bytes;
 };
 
 export const replaceResumePdf = async (
@@ -147,7 +149,7 @@ export const replaceResumePdf = async (
     candidate_id: candidateId,
     storage_path: path,
     original_filename: file.name,
-    mime_type: file.type,
+    mime_type: 'application/pdf',
     size_bytes: file.size,
   });
 };

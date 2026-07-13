@@ -2,9 +2,12 @@ import { Hono } from 'hono';
 import { Field } from '../components/forms';
 import { Layout } from '../components/layout';
 import type { Bindings } from '../env';
+import { deletionEmail, queueEmail } from '../lib/email';
 import { getStripe } from '../lib/stripe';
 import { getServiceClient } from '../lib/supabase';
+import { rateLimit } from '../middleware/rate-limit';
 import { requireRole } from '../middleware/role';
+import { verifyTurnstile } from '../middleware/turnstile';
 import {
   addCandidateEducation,
   addCandidateExperience,
@@ -25,6 +28,7 @@ export const candidateRoutes = new Hono<{
 }>();
 
 candidateRoutes.use('*', requireRole(['candidate']));
+candidateRoutes.use('/verification/checkout', rateLimit('identity_checkout', 5, 3600, 'user'));
 
 candidateRoutes.use('/resume*', async (c, next) => {
   const { data } = await getServiceClient(c)
@@ -89,13 +93,17 @@ candidateRoutes.get('/verification', async (c) => {
       <h1>Identity verification</h1>
       <p>Status: {data?.identity_status ?? 'not_started'}</p>
       <p>The one-time verification fee is $2.49 USD.</p>
-      <form method="post" action="/candidate/verification/checkout"><button>Pay and verify</button></form>
+      <form method="post" action="/candidate/verification/checkout"><div class="cf-turnstile" data-sitekey={c.env.TURNSTILE_SITE_KEY}></div><button>Pay and verify</button></form>
       <form method="post" action="/candidate/verification/session"><button>Continue verification</button></form>
     </Layout>,
   );
 });
 
 candidateRoutes.post('/verification/checkout', async (c) => {
+  const body = await c.req.parseBody();
+  if (!(await verifyTurnstile(c, String(body['cf-turnstile-response'] ?? '')))) {
+    return c.json({ error: 'bot_check_failed' }, 400);
+  }
   const checkout = await createIdentityCheckout(c, c.get('sessionUser')!.id);
   return checkout.url ? c.redirect(checkout.url, 303) : c.json({ error: 'checkout_unavailable' }, 502);
 });
@@ -291,7 +299,9 @@ candidateRoutes.get('/settings', (c) => c.html(
 
 candidateRoutes.post('/delete-account', async (c) => {
   try {
-    const restoreUntil = await requestCandidateDeletion(c, c.get('sessionUser')!.id);
+    const user = c.get('sessionUser')!;
+    const restoreUntil = await requestCandidateDeletion(c, user.id);
+    queueEmail(c, deletionEmail(user.email, restoreUntil.toISOString()));
     return c.json({ ok: true, restoreDays: 30, restoreUntil: restoreUntil.toISOString() });
   } catch {
     return c.json({ error: 'account_deletion_request_failed' }, 500);

@@ -8,6 +8,7 @@ export const Layout = ({ title, children }: { title: string; children: Child }) 
       <meta name="description" content="Private resume marketplace for US and Canadian jobs." />
       <title>{title}</title>
       <link rel="stylesheet" href="/styles.css" />
+      <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
     </head>
     <body>
       <header class="site-header">

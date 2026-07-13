@@ -4,10 +4,13 @@ import { Layout } from '../components/layout';
 import { Pagination } from '../components/pagination';
 import type { Bindings } from '../env';
 import { getServiceClient } from '../lib/supabase';
+import { rateLimit } from '../middleware/rate-limit';
 import { parseJobSearch, searchPublicJobs } from '../services/job-service';
 import type { AppVariables } from '../types/app';
 
 export const publicRoutes = new Hono<{ Bindings: Bindings; Variables: AppVariables }>();
+
+publicRoutes.use('/reports', rateLimit('report', 10, 86400, 'user'));
 
 publicRoutes.get('/', (c) =>
   c.html(
@@ -29,22 +32,24 @@ publicRoutes.get('/login', (c) =>
       <form method="post" action="/auth/login" class="card form-stack">
         <Field label="Email" name="email"><input id="email" name="email" type="email" autocomplete="email" required /></Field>
         <Field label="Password" name="password"><input id="password" name="password" type="password" autocomplete="current-password" minlength={12} required /></Field>
+        <div class="cf-turnstile" data-sitekey={c.env.TURNSTILE_SITE_KEY}></div>
         <button>Sign in</button>
       </form>
     </Layout>,
   ),
 );
 
-const RegisterForm = ({ role }: { role: 'candidate' | 'employer' }) => (
+const RegisterForm = ({ role, siteKey }: { role: 'candidate' | 'employer'; siteKey: string }) => (
   <form method="post" action={`/auth/register/${role}`} class="card form-stack">
     <Field label="Email" name="email"><input id="email" name="email" type="email" autocomplete="email" required /></Field>
     <Field label="Password" name="password"><input id="password" name="password" type="password" autocomplete="new-password" minlength={12} required /></Field>
+    <div class="cf-turnstile" data-sitekey={siteKey}></div>
     <button>Create {role} account</button>
   </form>
 );
 
-publicRoutes.get('/register/candidate', (c) => c.html(<Layout title="Create candidate account"><h1>Create candidate account</h1><RegisterForm role="candidate" /></Layout>));
-publicRoutes.get('/register/employer', (c) => c.html(<Layout title="Create employer account"><h1>Create employer account</h1><RegisterForm role="employer" /></Layout>));
+publicRoutes.get('/register/candidate', (c) => c.html(<Layout title="Create candidate account"><h1>Create candidate account</h1><RegisterForm role="candidate" siteKey={c.env.TURNSTILE_SITE_KEY} /></Layout>));
+publicRoutes.get('/register/employer', (c) => c.html(<Layout title="Create employer account"><h1>Create employer account</h1><RegisterForm role="employer" siteKey={c.env.TURNSTILE_SITE_KEY} /></Layout>));
 
 publicRoutes.get('/jobs', async (c) => {
   const parsed = parseJobSearch(c.req.query());

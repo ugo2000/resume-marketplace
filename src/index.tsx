@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Bindings } from './env';
 import { authMiddleware } from './middleware/auth';
+import { csrfMiddleware } from './middleware/csrf';
 import { adminRoutes } from './routes/admin';
 import { authRoutes } from './routes/auth';
 import { candidateRoutes } from './routes/candidate';
@@ -17,6 +18,7 @@ app.get('/health', (c) =>
 );
 app.route('/webhooks', webhookRoutes);
 app.use('*', authMiddleware);
+app.use('*', csrfMiddleware);
 app.route('/auth', authRoutes);
 app.route('/candidate', candidateRoutes);
 app.route('/employer', employerRoutes);

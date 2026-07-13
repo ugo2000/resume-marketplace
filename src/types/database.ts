@@ -210,6 +210,13 @@ export type Database = {
         restore_until: string;
         completed_at: string | null;
       }>;
+      rate_limit_windows: Table<{
+        scope: string;
+        subject_hash: string;
+        window_start: string;
+        request_count: number;
+        expires_at: string;
+      }>;
     };
     Views: Record<never, never>;
     Functions: {
@@ -286,6 +293,20 @@ export type Database = {
       documents_due_for_deletion: {
         Args: Record<never, never>;
         Returns: { document_id: string; storage_path: string }[];
+      };
+      consume_rate_limit: {
+        Args: {
+          p_scope: string;
+          p_subject_hash: string;
+          p_window_start: string;
+          p_window_seconds: number;
+          p_max_requests: number;
+        };
+        Returns: boolean;
+      };
+      delete_expired_rate_limits: {
+        Args: Record<never, never>;
+        Returns: number;
       };
     };
     Enums: {

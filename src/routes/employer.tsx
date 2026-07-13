@@ -4,7 +4,9 @@ import { Layout } from '../components/layout';
 import type { Bindings } from '../env';
 import { createResumeSignedUrl } from '../lib/signed-files';
 import { getServiceClient, getUserClient } from '../lib/supabase';
+import { rateLimit } from '../middleware/rate-limit';
 import { requireRole } from '../middleware/role';
+import { verifyTurnstile } from '../middleware/turnstile';
 import { createCreditCheckout } from '../services/credit-service';
 import { submitEmployerReview } from '../services/employer-service';
 import { createJobSlug, jobDraftSchema } from '../services/job-service';
@@ -17,6 +19,11 @@ export const employerRoutes = new Hono<{
 }>();
 
 employerRoutes.use('*', requireRole(['employer']));
+employerRoutes.use('/onboarding', rateLimit('employer_submission', 3, 86400, 'user'));
+employerRoutes.use('/jobs', rateLimit('job_write', 30, 3600, 'user'));
+employerRoutes.use('/candidates', rateLimit('candidate_search', 120, 3600, 'user'));
+employerRoutes.use('/candidates/*/unlock', rateLimit('candidate_unlock', 60, 3600, 'user'));
+employerRoutes.use('/credits/checkout/*', rateLimit('credit_checkout', 10, 3600, 'user'));
 
 const requireApprovedEmployer = async (c: Parameters<typeof getServiceClient>[0], next: () => Promise<void>) => {
   const { data } = await getServiceClient(c)
@@ -47,6 +54,7 @@ employerRoutes.get('/onboarding', (c) =>
         <Field label="Registration number" name="registrationNumber"><input id="registrationNumber" name="registrationNumber" required /></Field>
         <Field label="Country" name="country"><select id="country" name="country"><option value="US">United States</option><option value="CA">Canada</option></select></Field>
         <Field label="Registration proof" name="document"><input id="document" name="document" type="file" accept="application/pdf,image/png,image/jpeg" required /></Field>
+        <div class="cf-turnstile" data-sitekey={c.env.TURNSTILE_SITE_KEY}></div>
         <button>Submit for review</button>
       </form>
     </Layout>,
@@ -57,6 +65,9 @@ employerRoutes.post('/onboarding', async (c) => {
   const body = await c.req.parseBody();
   if (!(body.document instanceof File)) {
     return c.json({ error: 'registration_document_required' }, 400);
+  }
+  if (!(await verifyTurnstile(c, String(body['cf-turnstile-response'] ?? '')))) {
+    return c.json({ error: 'bot_check_failed' }, 400);
   }
   try {
     await submitEmployerReview(c, c.get('sessionUser')!.id, body, body.document);
@@ -248,11 +259,13 @@ employerRoutes.get('/credits', async (c) => {
         <form method="post" action="/employer/credits/checkout/10" class="card">
           <h2>10 lookups</h2>
           <p>USD $30.00</p>
+          <div class="cf-turnstile" data-sitekey={c.env.TURNSTILE_SITE_KEY}></div>
           <button>Buy 10 credits</button>
         </form>
         <form method="post" action="/employer/credits/checkout/25" class="card">
           <h2>25 lookups</h2>
           <p>USD $75.00</p>
+          <div class="cf-turnstile" data-sitekey={c.env.TURNSTILE_SITE_KEY}></div>
           <button>Buy 25 credits</button>
         </form>
       </div>
@@ -271,6 +284,10 @@ employerRoutes.get('/credits', async (c) => {
 });
 
 employerRoutes.post('/credits/checkout/:pack', async (c) => {
+  const body = await c.req.parseBody();
+  if (!(await verifyTurnstile(c, String(body['cf-turnstile-response'] ?? '')))) {
+    return c.json({ error: 'bot_check_failed' }, 400);
+  }
   try {
     const session = await createCreditCheckout(
       c,

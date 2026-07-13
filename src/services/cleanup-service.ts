@@ -1,4 +1,5 @@
 import type { Bindings } from '../env';
+import { jobExpiryEmail, sendEmailWithEnv } from '../lib/email';
 import type { AppContext } from '../lib/supabase';
 import { getServiceClient, getServiceClientFromEnv } from '../lib/supabase';
 
@@ -118,8 +119,37 @@ export const runDailyCleanup = async (env: Bindings) => {
     if (authError) throw authError;
   }
 
+  const reminderStart = new Date(Date.now() + 3 * DAY_MS).toISOString();
+  const reminderEnd = new Date(Date.now() + 4 * DAY_MS).toISOString();
+  const { data: expiringJobs, error: reminderError } = await service
+    .from('jobs')
+    .select('title,expires_at,employer_id')
+    .eq('status', 'published')
+    .gte('expires_at', reminderStart)
+    .lt('expires_at', reminderEnd);
+  if (reminderError) throw reminderError;
+  const employerIds = [...new Set((expiringJobs ?? []).map((job) => job.employer_id))];
+  const { data: employers, error: employersError } = employerIds.length
+    ? await service
+        .from('employer_profiles')
+        .select('user_id,company_email')
+        .in('user_id', employerIds)
+    : { data: [], error: null };
+  if (employersError) throw employersError;
+  const emailByEmployer = new Map((employers ?? []).map((employer) => [employer.user_id, employer.company_email]));
+  await Promise.all(
+    (expiringJobs ?? []).map((job) => {
+      const email = emailByEmployer.get(job.employer_id);
+      return email && job.expires_at
+        ? sendEmailWithEnv(env, jobExpiryEmail(email, job.title, job.expires_at))
+        : Promise.resolve();
+    }),
+  );
+
   const { data: expiredCount, error: expiryError } = await service.rpc('expire_jobs');
   if (expiryError) throw expiryError;
+  const { error: rateLimitCleanupError } = await service.rpc('delete_expired_rate_limits');
+  if (rateLimitCleanupError) throw rateLimitCleanupError;
 
   return {
     deletedEmployerDocuments: documents?.length ?? 0,

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { employerSubmissionEmail, queueEmail, reviewEmail } from '../lib/email';
+import { validateEmployerDocument } from '../lib/file-validation';
 import type { AppContext } from '../lib/supabase';
 import { getServiceClient } from '../lib/supabase';
 import type { Database } from '../types/database';
@@ -22,19 +24,6 @@ const employerSchema = z.object({
   country: z.enum(['US', 'CA']),
 });
 
-const validDocumentSignature = (bytes: Uint8Array, mimeType: string) => {
-  if (mimeType === 'application/pdf') {
-    return new TextDecoder().decode(bytes.slice(0, 5)) === '%PDF-';
-  }
-  if (mimeType === 'image/png') {
-    return bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => bytes[i] === v);
-  }
-  if (mimeType === 'image/jpeg') {
-    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
-  }
-  return false;
-};
-
 export const submitEmployerReview = async (
   c: AppContext,
   employerId: string,
@@ -42,15 +31,7 @@ export const submitEmployerReview = async (
   file: File,
 ) => {
   const input = employerSchema.parse(raw);
-  const allowed = ['application/pdf', 'image/png', 'image/jpeg'];
-  if (!allowed.includes(file.type) || file.size < 1 || file.size > 10 * 1024 * 1024) {
-    throw new Error('invalid_employer_document');
-  }
-
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (!validDocumentSignature(bytes, file.type)) {
-    throw new Error('invalid_employer_document_signature');
-  }
+  const { bytes, detectedType } = await validateEmployerDocument(file);
 
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   const sha256 = [...new Uint8Array(digest)]
@@ -60,7 +41,7 @@ export const submitEmployerReview = async (
   const path = `${employerId}/${crypto.randomUUID()}`;
   const { error: uploadError } = await service.storage
     .from('employer-documents')
-    .upload(path, bytes, { contentType: file.type });
+    .upload(path, bytes, { contentType: detectedType });
   if (uploadError) throw uploadError;
 
   const { error: profileError } = await service.from('employer_profiles').upsert({
@@ -82,7 +63,7 @@ export const submitEmployerReview = async (
     employer_id: employerId,
     storage_path: path,
     original_filename: file.name,
-    mime_type: file.type,
+    mime_type: detectedType,
     size_bytes: file.size,
     document_type: 'registration_proof',
     file_sha256: sha256,
@@ -91,6 +72,7 @@ export const submitEmployerReview = async (
     await service.storage.from('employer-documents').remove([path]);
     throw documentError;
   }
+  queueEmail(c, employerSubmissionEmail(input.companyEmail));
 };
 
 export const decideEmployerReview = async (
@@ -140,5 +122,14 @@ export const decideEmployerReview = async (
       used_credits: 0,
     });
     if (walletError && walletError.code !== '23505') throw walletError;
+  }
+
+  const { data: employer } = await service
+    .from('employer_profiles')
+    .select('company_email')
+    .eq('user_id', employerId)
+    .maybeSingle();
+  if (employer) {
+    queueEmail(c, reviewEmail(employer.company_email, decision, rejectionReason ?? undefined));
   }
 };

@@ -1,5 +1,6 @@
+import { applicationEmail, queueEmail } from '../lib/email';
 import type { AppContext } from '../lib/supabase';
-import { getUserClient } from '../lib/supabase';
+import { getServiceClient, getUserClient } from '../lib/supabase';
 
 export const canApply = (
   identityStatus: string,
@@ -22,5 +23,18 @@ export const applyToJob = async (
   if (error) throw error;
   const result = Array.isArray(data) ? data[0] : data;
   if (!result) throw new Error('application_not_created');
+
+  const service = getServiceClient(c);
+  const [{ data: job }, { data: employer }] = await Promise.all([
+    service.from('jobs').select('title').eq('id', jobId).maybeSingle(),
+    service
+      .from('employer_profiles')
+      .select('company_email')
+      .eq('user_id', result.employer_id)
+      .maybeSingle(),
+  ]);
+  if (job && employer) {
+    queueEmail(c, applicationEmail(employer.company_email, job.title));
+  }
   return result;
 };
