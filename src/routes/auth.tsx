@@ -22,6 +22,24 @@ const cookieOptions = (origin: string, maxAge: number) => ({
   maxAge,
 });
 
+
+export type AuthCallbackInput =
+  | { kind: 'otp'; tokenHash: string; type: 'email' }
+  | { kind: 'code'; code: string };
+
+export const parseAuthCallback = (params: URLSearchParams): AuthCallbackInput | null => {
+  const tokenHash = params.get('token_hash');
+  const type = params.get('type');
+  if (tokenHash && type === 'email') {
+    return { kind: 'otp', tokenHash, type: 'email' };
+  }
+
+  const code = params.get('code');
+  if (code) return { kind: 'code', code };
+
+  return null;
+};
+
 export const authRoutes = new Hono<{
   Bindings: Bindings;
   Variables: AppVariables;
@@ -94,12 +112,19 @@ authRoutes.post('/login', async (c) => {
 });
 
 authRoutes.get('/callback', async (c) => {
-  const code = c.req.query('code');
-  if (!code) return c.json({ error: 'verification_code_missing' }, 400);
+  const callback = parseAuthCallback(new URL(c.req.url).searchParams);
+  if (!callback) return c.json({ error: 'verification_code_missing' }, 400);
 
   const client = getUserClient(c);
-  const { data, error } = await client.auth.exchangeCodeForSession(code);
-  if (error || !data.session) return c.json({ error: 'email_verification_failed' }, 400);
+  const { data, error } = callback.kind === 'otp'
+    ? await client.auth.verifyOtp({
+        token_hash: callback.tokenHash,
+        type: callback.type,
+      })
+    : await client.auth.exchangeCodeForSession(callback.code);
+  if (error || !data.session || !data.user) {
+    return c.json({ error: 'email_verification_failed' }, 400);
+  }
 
   setCookie(
     c,
