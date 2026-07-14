@@ -39,17 +39,196 @@ publicRoutes.get('/login', (c) =>
   ),
 );
 
-const RegisterForm = ({ role, siteKey }: { role: 'candidate' | 'employer'; siteKey: string }) => (
-  <form method="post" action={`/auth/register/${role}`} class="card form-stack">
+const EmployerRegisterForm = ({ siteKey }: { siteKey: string }) => (
+  <form method="post" action="/auth/register/employer" class="card form-stack">
     <Field label="Email" name="email"><input id="email" name="email" type="email" autocomplete="email" required /></Field>
     <Field label="Password" name="password"><input id="password" name="password" type="password" autocomplete="new-password" minlength={12} required /></Field>
     <div class="cf-turnstile" data-sitekey={siteKey}></div>
-    <button>Create {role} account</button>
+    <button>Create employer account</button>
   </form>
 );
 
-publicRoutes.get('/register/candidate', (c) => c.html(<Layout title="Create candidate account"><h1>Create candidate account</h1><RegisterForm role="candidate" siteKey={c.env.TURNSTILE_SITE_KEY} /></Layout>));
-publicRoutes.get('/register/employer', (c) => c.html(<Layout title="Create employer account"><h1>Create employer account</h1><RegisterForm role="employer" siteKey={c.env.TURNSTILE_SITE_KEY} /></Layout>));
+const CandidateRegisterForm = ({ siteKey }: { siteKey: string }) => (
+  <section class="registration-shell">
+    <header class="registration-intro">
+      <p class="eyebrow">Private candidate account</p>
+      <h1>Create your candidate account</h1>
+      <p>
+        Complete all three steps. Your account is created only after the final
+        submission.
+      </p>
+    </header>
+
+    <ol class="registration-progress" aria-label="Registration progress">
+      <li data-progress-step="1" aria-current="step"><span>1</span>Account</li>
+      <li data-progress-step="2"><span>2</span>Job profile</li>
+      <li data-progress-step="3"><span>3</span>Review</li>
+    </ol>
+
+    <form
+      method="post"
+      action="/auth/register/candidate"
+      class="card registration-form"
+      data-candidate-registration
+    >
+      <p class="form-status" data-registration-status aria-live="polite">
+        Step 1 of 3: Account
+      </p>
+
+      <fieldset data-registration-step="1">
+        <legend tabindex={-1}>Step 1: Create account</legend>
+        <p class="form-note" id="account-step-note">
+          Nothing is submitted and no account is created until you finish Step 3.
+        </p>
+        <div class="form-grid">
+          <Field label="Email address" name="email">
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              maxlength={320}
+              aria-describedby="account-step-note"
+              required
+            />
+          </Field>
+          <Field label="Password" name="password">
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autocomplete="new-password"
+              minlength={12}
+              maxlength={128}
+              aria-describedby="password-note"
+              required
+            />
+          </Field>
+          <p class="form-note field-span" id="password-note">
+            Use 12–128 characters. A password manager is recommended.
+          </p>
+          <Field label="Confirm password" name="confirmPassword">
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              autocomplete="new-password"
+              minlength={12}
+              maxlength={128}
+              required
+            />
+          </Field>
+        </div>
+        <div class="registration-actions">
+          <button type="button" data-next-step="2">Continue</button>
+        </div>
+      </fieldset>
+
+      <fieldset data-registration-step="2">
+        <legend tabindex={-1}>Step 2: Job profile</legend>
+        <p class="form-note">
+          This information creates your private candidate profile after final submission.
+        </p>
+        <div class="form-grid">
+          <Field label="Legal name" name="fullName">
+            <input id="fullName" name="fullName" autocomplete="name" minlength={2} maxlength={160} required />
+          </Field>
+          <Field label="Country" name="country">
+            <select id="country" name="country" autocomplete="country" required>
+              <option value="">Select a country</option>
+              <option value="US">United States</option>
+              <option value="CA">Canada</option>
+            </select>
+          </Field>
+          <Field label="State or province" name="stateProvince">
+            <input id="stateProvince" name="stateProvince" autocomplete="address-level1" maxlength={120} required />
+          </Field>
+          <Field label="City" name="city">
+            <input id="city" name="city" autocomplete="address-level2" maxlength={120} required />
+          </Field>
+          <Field label="Desired job title" name="headline">
+            <input id="headline" name="headline" autocomplete="organization-title" minlength={2} maxlength={160} required />
+          </Field>
+          <Field label="Years of experience" name="yearsExperience">
+            <input id="yearsExperience" name="yearsExperience" type="number" inputmode="numeric" min={0} max={80} step={1} required />
+          </Field>
+          <Field label="Work authorization" name="workAuthorization">
+            <select id="workAuthorization" name="workAuthorization" required>
+              <option value="">Select your status</option>
+              <option value="authorized_without_sponsorship">Authorized without sponsorship</option>
+              <option value="future_sponsorship_may_be_required">May require sponsorship in the future</option>
+              <option value="sponsorship_required">Requires sponsorship</option>
+            </select>
+          </Field>
+        </div>
+        <div class="registration-actions">
+          <button type="button" class="secondary-button" data-back-step="1">Back</button>
+          <button type="button" data-next-step="3">Continue</button>
+        </div>
+      </fieldset>
+
+      <fieldset data-registration-step="3">
+        <legend tabindex={-1}>Step 3: Review and confirm</legend>
+        <p class="form-note">Review your non-sensitive details before creating the account.</p>
+        <dl class="review-list">
+          <div><dt>Email</dt><dd data-review-field="email">—</dd></div>
+          <div><dt>Legal name</dt><dd data-review-field="fullName">—</dd></div>
+          <div><dt>Location</dt><dd data-review-field="location">—</dd></div>
+          <div><dt>Desired job title</dt><dd data-review-field="headline">—</dd></div>
+          <div><dt>Experience</dt><dd data-review-field="yearsExperience">—</dd></div>
+          <div><dt>Work authorization</dt><dd data-review-field="workAuthorization">—</dd></div>
+        </dl>
+
+        <section class="registration-disclosure" aria-labelledby="privacy-disclosure-title">
+          <h2 id="privacy-disclosure-title">Privacy and verification</h2>
+          <ul>
+            <li>Registration is free.</li>
+            <li>Your candidate profile is not published on the open web.</li>
+            <li>Only approved employers can access eligible profiles under platform rules.</li>
+            <li>A one-time $2.49 USD identity-verification fee is required before publishing a resume or applying for jobs.</li>
+            <li>Government ID and selfie media are handled by the identity provider and are not stored by this application.</li>
+          </ul>
+        </section>
+
+        <div class="confirmation-list">
+          <label class="checkbox-field">
+            <input name="age18" type="checkbox" required />
+            <span>I confirm that I am at least 18 years old.</span>
+          </label>
+          <label class="checkbox-field">
+            <input name="termsAccepted" type="checkbox" required />
+            <span>I agree to the <a href="/terms" target="_blank" rel="noreferrer">Terms</a>.</span>
+          </label>
+          <label class="checkbox-field">
+            <input name="privacyAccepted" type="checkbox" required />
+            <span>I acknowledge the <a href="/privacy" target="_blank" rel="noreferrer">Privacy policy</a>.</span>
+          </label>
+        </div>
+
+        <div class="cf-turnstile" data-sitekey={siteKey}></div>
+        <div class="registration-actions">
+          <button type="button" class="secondary-button" data-back-step="2">Back</button>
+          <button type="submit" data-final-submit>Create candidate account</button>
+        </div>
+      </fieldset>
+    </form>
+
+    <p>Already registered? <a href="/login">Sign in</a>.</p>
+    <script src="/candidate-registration.js" defer></script>
+  </section>
+);
+
+publicRoutes.get('/register/candidate', (c) => c.html(
+  <Layout title="Create candidate account">
+    <CandidateRegisterForm siteKey={c.env.TURNSTILE_SITE_KEY} />
+  </Layout>,
+));
+publicRoutes.get('/register/employer', (c) => c.html(
+  <Layout title="Create employer account">
+    <h1>Create employer account</h1>
+    <EmployerRegisterForm siteKey={c.env.TURNSTILE_SITE_KEY} />
+  </Layout>,
+));
 
 publicRoutes.get('/jobs', async (c) => {
   const parsed = parseJobSearch(c.req.query());
