@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { deleteCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { Layout } from '../components/layout';
 import type { Bindings } from '../env';
 import { getServiceClient, getUserClient } from '../lib/supabase';
+import type { AppContext } from '../lib/supabase';
 import { rateLimit } from '../middleware/rate-limit';
 import { verifyTurnstile } from '../middleware/turnstile';
 import { restoreCandidateAccount } from '../services/cleanup-service';
@@ -13,6 +15,20 @@ const credentialsSchema = z.object({
   password: z.string().min(12).max(128),
 });
 const roleSchema = z.enum(['candidate', 'employer']);
+
+const implicitSessionSchema = z.object({
+  accessToken: z.string().min(20).max(8192),
+  refreshToken: z.string().min(20).max(8192),
+});
+
+export type ImplicitSessionPayload = z.infer<typeof implicitSessionSchema>;
+
+export const parseImplicitSessionPayload = (
+  input: unknown,
+): ImplicitSessionPayload | null => {
+  const result = implicitSessionSchema.safeParse(input);
+  return result.success ? result.data : null;
+};
 
 const cookieOptions = (origin: string, maxAge: number) => ({
   httpOnly: true,
@@ -111,9 +127,50 @@ authRoutes.post('/login', async (c) => {
   return c.json({ ok: true });
 });
 
+const onboardingPathForUser = async (c: AppContext, userId: string) => {
+  const service = getServiceClient(c);
+  const { data: profile } = await service
+    .from('users')
+    .select('role')
+    .eq('id', userId)
+    .maybeSingle();
+  return profile?.role === 'employer'
+    ? '/employer/onboarding'
+    : '/candidate/onboarding';
+};
+
+const setSessionCookies = (
+  c: AppContext,
+  session: { access_token: string; refresh_token: string },
+) => {
+  setCookie(
+    c,
+    'sb-access-token',
+    session.access_token,
+    cookieOptions(c.env.APP_ORIGIN, 3600),
+  );
+  setCookie(
+    c,
+    'sb-refresh-token',
+    session.refresh_token,
+    cookieOptions(c.env.APP_ORIGIN, 2_592_000),
+  );
+};
+
 authRoutes.get('/callback', async (c) => {
   const callback = parseAuthCallback(new URL(c.req.url).searchParams);
-  if (!callback) return c.json({ error: 'verification_code_missing' }, 400);
+  if (!callback) {
+    return c.html(
+      <Layout title="Confirming your email">
+        <section class="card" aria-live="polite">
+          <h1>Confirming your email</h1>
+          <p id="auth-callback-status">Please wait while we finish signing you in.</p>
+          <noscript>JavaScript is required to finish email confirmation.</noscript>
+          <script src="/auth-callback.js" defer></script>
+        </section>
+      </Layout>,
+    );
+  }
 
   const client = getUserClient(c);
   const { data, error } = callback.kind === 'otp'
@@ -126,28 +183,28 @@ authRoutes.get('/callback', async (c) => {
     return c.json({ error: 'email_verification_failed' }, 400);
   }
 
-  setCookie(
-    c,
-    'sb-access-token',
-    data.session.access_token,
-    cookieOptions(c.env.APP_ORIGIN, 3600),
-  );
-  setCookie(
-    c,
-    'sb-refresh-token',
-    data.session.refresh_token,
-    cookieOptions(c.env.APP_ORIGIN, 2_592_000),
-  );
+  setSessionCookies(c, data.session);
+  return c.redirect(await onboardingPathForUser(c, data.user.id));
+});
 
-  const service = getServiceClient(c);
-  const { data: profile } = await service
-    .from('users')
-    .select('role')
-    .eq('id', data.user.id)
-    .maybeSingle();
-  return c.redirect(
-    profile?.role === 'employer' ? '/employer/onboarding' : '/candidate/onboarding',
-  );
+authRoutes.post('/callback/session', async (c) => {
+  const payload = parseImplicitSessionPayload(await c.req.json().catch(() => null));
+  if (!payload) return c.json({ error: 'invalid_session_tokens' }, 400);
+
+  const client = getUserClient(c);
+  const { data, error } = await client.auth.setSession({
+    access_token: payload.accessToken,
+    refresh_token: payload.refreshToken,
+  });
+  if (error || !data.session || !data.user) {
+    return c.json({ error: 'email_verification_failed' }, 400);
+  }
+
+  setSessionCookies(c, data.session);
+  return c.json({
+    ok: true,
+    next: await onboardingPathForUser(c, data.user.id),
+  });
 });
 
 authRoutes.post('/logout', (c) => {
